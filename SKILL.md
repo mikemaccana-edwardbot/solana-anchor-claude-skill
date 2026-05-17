@@ -253,6 +253,80 @@ try {
 }
 ```
 
+## Testing Anchor programs with Kit + LiteSVM
+
+All new Anchor test code must follow this pattern. The canonical reference implementation is [`solanakite/anchor-escrow-2026`](https://github.com/solanakite/anchor-escrow-2026) — read it before writing tests.
+
+Do not write new tests using `solana-test-validator`, `anchor test --validator legacy`, `anchor.workspace`, `anchor.AnchorProvider.env()`, `anchor.setProvider()`, or `program.methods.X().rpc()`. Those patterns are legacy.
+
+### Runtime
+
+- Run tests against **LiteSVM** via `kit-plugin-litesvm`. Tests execute in-process — no validator boot, no `solana-test-validator`, no `--validator legacy`.
+- **Test runner**: `node:test` invoked with `npx tsx --test --test-reporter=spec`. Do not use mocha or `ts-mocha`.
+
+### Connection and accounts
+
+- Get a connection from [`solana-kite`](https://solanakite.org): `const connection = await connect();`
+- Use Kite helpers for setup, not Anchor's provider: `connection.createWallets()`, `connection.createTokenMint()`, `connection.getPDAAndBump(programAddress, ["seed", value])`, `connection.getTokenAccountAddress(owner, mint, true)`.
+- For the SPL Token program, use `TOKEN_EXTENSIONS_PROGRAM` from `solana-kite`.
+
+### Types
+
+- Use types from [`@solana/kit`](https://solanakit.com): `KeyPairSigner`, `Address`, `lamports`.
+- Do not use `@solana/web3.js` types (`Keypair`, `PublicKey`, `Transaction`) in new test code.
+
+### Program client
+
+- Generate a Codama client from the program IDL with `npx create-codama-clients`, then import the instruction builders from the generated client (for example `import { getInitializeInstruction } from "../dist/<program>-client";`).
+- Do not call `anchor.workspace.<Program>` or `program.methods.<x>().rpc()` in new tests.
+
+### Sending transactions
+
+Build instructions with the Codama client and submit them through Kite:
+
+```ts
+const signature = await connection.sendTransactionFromInstructions({
+  feePayer,
+  instructions,
+});
+```
+
+Do not use `.rpc()` or `.sendAndConfirm()`.
+
+### Project wiring
+
+- `package.json` must set `"type": "module"`.
+- `Anchor.toml` test script: `npx create-codama-clients; npx tsx --test --test-reporter=spec tests/*.ts`
+
+### Minimal test skeleton
+
+```ts
+import { before, describe, test } from "node:test";
+import assert from "node:assert";
+import { connect, SOL, TOKEN_EXTENSIONS_PROGRAM } from "solana-kite";
+import type { Address, KeyPairSigner } from "@solana/kit";
+import { getInitializeInstruction } from "../dist/escrow-client";
+
+describe("escrow", () => {
+  let connection: Awaited<ReturnType<typeof connect>>;
+  let maker: KeyPairSigner;
+
+  before(async () => {
+    connection = await connect();
+    [maker] = await connection.createWallets(1, { airdropAmount: SOL(10n) });
+  });
+
+  test("initialises", async () => {
+    const instruction = getInitializeInstruction({ maker /* ... */ });
+    const signature = await connection.sendTransactionFromInstructions({
+      feePayer: maker,
+      instructions: [instruction],
+    });
+    assert.ok(signature);
+  });
+});
+```
+
 ## Rust Guidelines (Anchor Programs)
 
 ### Terminology
